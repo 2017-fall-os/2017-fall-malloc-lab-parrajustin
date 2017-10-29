@@ -91,11 +91,11 @@ BlockSuffix_t *computePrevSuffixAddr(BlockPrefix_t *p) {
 }
 
 BlockPrefix_t *getNextPrefix(BlockPrefix_t *p) { /* return addr of next block (prefix), or 0 if last */
-    BlockPrefix_t *np = computeNextPrefixAddr(p);
-    if ((void*)np < (void *)arenaEnd)
-	return np;
-    else
-	return (BlockPrefix_t *)0;
+  BlockPrefix_t *np = computeNextPrefixAddr(p);
+  if ((void*)np < (void *)arenaEnd)
+    return np;
+  else
+	  return (BlockPrefix_t *)0;
 }
 
 BlockPrefix_t *getPrevPrefix(BlockPrefix_t *p) { /* return addr of prev block, or 0 if first */
@@ -107,18 +107,18 @@ BlockPrefix_t *getPrevPrefix(BlockPrefix_t *p) { /* return addr of prev block, o
 }
 
 BlockPrefix_t *coalescePrev(BlockPrefix_t *p) {	/* coalesce p with prev, return prev if coalesced, otherwise p */
-    BlockPrefix_t *prev = getPrevPrefix(p);
-    if (p && prev && (!p->allocated) && (!prev->allocated)) {
-	makeFreeBlock(prev, ((void *)computeNextPrefixAddr(p)) - (void *)prev);
-	return prev;
-    }
-    return p;
+  BlockPrefix_t *prev = getPrevPrefix(p);
+  if (p && prev && (!p->allocated) && (!prev->allocated)) {
+    makeFreeBlock(prev, ((void *)computeNextPrefixAddr(p)) - (void *)prev);
+    return prev;
+  }
+  return p;
 }    
 
 
 void coalesce(BlockPrefix_t *p) {	/* coalesce p with prev & next */
-    if (p != (void *)0) {
-        BlockPrefix_t *next;
+  if (p != (void *)0) {
+      BlockPrefix_t *next;
 	p = coalescePrev(p);
 	next = getNextPrefix(p);
 	if (next) 
@@ -234,11 +234,11 @@ void *firstFitAllocRegion(size_t s) {
 }
 
 void freeRegion(void *r) {
-    if (r != 0) {
-	BlockPrefix_t *p = regionToPrefix(r); /* convert to block */
-	p->allocated = 0;	/* mark as free */
-	coalesce(p);
-    }
+  if (r != 0) {
+    BlockPrefix_t *p = regionToPrefix(r); /* convert to block */
+    p->allocated = 0;	/* mark as free */
+    coalesce(p);
+  }
 }
 
 
@@ -260,13 +260,57 @@ void *resizeRegion(void *r, size_t newSize) {
   if (oldSize >= newSize)	/* old region is big enough */
     return r;
   else {			/* allocate new region & copy old data */
-    char *o = (char *)r;	/* treat both regions as char* */
-    char *n = (char *)firstFitAllocRegion(newSize); 
-    int i;
-    for (i = 0; i < oldSize; i++) /* copy byte-by-byte, should use memcpy */
-      n[i] = o[i];
-    freeRegion(o);		/* free old region */
-    return (void *)n;
+    void *prefix = regionToPrefix(r);
+    void *nextPrefix = getNextPrefix(prefix);
+
+    // this statement checks if there is a successor block and that the two blocks combine can fit the new data
+    size_t currentSpace = computeUsableSpace(prefix) + prefixSize + suffixSize;
+    size_t nextBlockSpace = nextPrefix != 0 && !nextPrefix->allocated ? computeUsableSpace(nextPrefix) + prefixSize + suffixSize : 0;
+    size_t neededTotalSpace = align8(prefixSize + suffixSize + newSize);
+    if (nextBlockSpace != 0 && currentSpace + nextBlockSpace >= neededTotalSpace ) {
+      // the two blocks combined and fit the data, but we need to check if we an split off the extra space into a new block
+
+      size_t remainingSpace = nextBlockSpace - (neededTotalSpace - currentSpace);
+      if (remainingSpace >= prefixSize + suffixSize) {
+        // there is enough space to create another block
+        BlockPrefix_t *next = nextPrefix;
+        BlockPrefix_t *nextBlockSuffixPointer = next->suffix;
+        prefix = makeFreeBlock(prefix, neededTotalSpace);
+
+        // new block
+        BlockPrefix_t *current = prefix;
+        current->allocated = 1; // set it as collocated
+
+        // now we have to allocate the next block
+        BlockPrefix_t *newCurrent = prefix;
+        void *possibleNext = getNextPrefix(newCurrent);
+
+        size_t size = (void *)nextBlockSuffixPointer - possibleNext + suffixSize;
+        makeFreeBlock(possibleNext, size);
+      } else {
+        // just combine the two blocks since there isn't enough space left over for another block
+        BlockPrefix_t *current = prefix;
+        BlockPrefix_t *next = nextPrefix;
+
+        // set the current to allocated just in case
+        current->allocated = 1;
+        // set the current's suffix to the next block's suffix instead 
+        current->suffix = next->suffix;
+        // overwrite the next block's suffix's prefix to be that of the current block
+        current->suffix->prefix = current;
+      }
+
+      return prefixToRegion(prefix);	/* convert to *region */
+    } else {
+      // not enough space or there is no next block
+      char *o = (char *)r;	/* treat both regions as char* */
+      char *n = (char *)firstFitAllocRegion(newSize); 
+      int i;
+      for (i = 0; i < oldSize; i++) /* copy byte-by-byte, should use memcpy */
+        n[i] = o[i];
+      freeRegion(o);		/* free old region */
+      return (void *)n;
+    }
   }
 }
 
