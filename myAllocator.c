@@ -197,8 +197,10 @@ BlockPrefix_t *findFirstFit(size_t s) {	/* find first block with usable space > 
 BlockPrefix_t *findNextFit(size_t s) {	/* find first block with usable space > s after the last found block*/
   BlockPrefix_t *p = lastBlock;
   while (p) {
-    if (!p->allocated && computeUsableSpace(p) >= s)
+    if (!p->allocated && computeUsableSpace(p) >= s) {
+      lastBlock = p;
       return p;
+    }
     p = getNextPrefix(p);
   }
   return growArena(s);
